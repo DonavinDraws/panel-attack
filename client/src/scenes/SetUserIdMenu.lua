@@ -10,6 +10,7 @@ local Label = require("client.src.ui.Label")
 -- @module setNameMenu
 -- Scene for setting the username
 local SetUserIdMenu = class(function(self, sceneParams)
+  self.keepMusic = true
   self:load(sceneParams)
 end, Scene)
 
@@ -38,10 +39,25 @@ function SetUserIdMenu:load(sceneParams)
     onClick = function() self:confirmId() end
   })
 
+  self.warningLabel = Label({
+    text = "THIS IS THE EQUIVALENT TO YOUR ACCOUNT AND PASSWORD IN ONE\n" ..
+           "DO NOT SHARE WITH ANYONE\n" ..
+           "ONLY CHANGE TO SYNC YOUR ID BETWEEN DIFFERENT DEVICES\n" ..
+           "ALTERING THIS TO SOMETHING ELSE THAN AN EXISTING ID WILL MAKE IT IMPOSSIBLE TO CONNECT TO 2P VS ONLINE FOR THIS SERVER\n",
+    translate = false,
+    wrap = true,
+    hFill = true,
+    hAlign = "center",
+    vAlign = "bottom",
+    y = -50,
+    fontSize = 20,
+  })
+
   self.idInputField:setFocus(0, 0)
   self.idInputField.offset = utf8.len(self.idInputField.value)
   self.uiRoot:addChild(self.idInputField)
   self.uiRoot:addChild(self.confirmationButton)
+  self.uiRoot:addChild(self.warningLabel)
 end
 
 function SetUserIdMenu:confirmId()

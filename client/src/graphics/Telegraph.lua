@@ -169,25 +169,35 @@ function Telegraph:renderStageGarbageIcon(sender, receiver, garbage, telegraphIn
   local y = (receiver.frameOriginY - TELEGRAPH_HEIGHT - TELEGRAPH_PADDING) * receiver.gfxScale
   local x = self:telegraphRenderXPosition(receiver, telegraphIndex) * receiver.gfxScale
   local image
-  if garbage.isChain and garbage.links then
+  if garbage.isChain then
     if config.renderAttacks then
-      -- only display the icon for how many chain links the attack already finished
-      local displayHeight = 0
-      for frameEarned, _ in pairs(garbage.links) do
-        if sender.clock - frameEarned > self:attackAnimationEndFrame() then
-          displayHeight = displayHeight + 1
+      if garbage.links then
+        -- only display the icon for how many chain links the attack already finished
+        local displayHeight = 0
+        for frameEarned, _ in pairs(garbage.links) do
+          if sender.clock - frameEarned > self:attackAnimationEndFrame() then
+            displayHeight = displayHeight + 1
+          end
         end
-      end
-      if displayHeight == 0 then
-        -- don't display anything if the attack for the first chain link is still underway
-        return
+        if displayHeight == 0 then
+          -- don't display anything if the attack for the first chain link is still underway
+          return
+        else
+          -- 14 is the maximum we have default data for
+          displayHeight = math.min(displayHeight, 14)
+          image = character.telegraph_garbage_images[displayHeight][6]
+        end
       else
+        if sender.clock - garbage.frameEarned < self:attackAnimationEndFrame() then
+          -- if attacks are rendered, icon display is delayed until the attack animation finished
+          return
+        end
         -- 14 is the maximum we have default data for
-        displayHeight = math.min(displayHeight, 14)
-        image = character.telegraph_garbage_images[displayHeight][6]
+        image = character.telegraph_garbage_images[math.min(garbage.height, 14)][6]
       end
     else
-      image = character.telegraph_garbage_images[garbage.height][6]
+      -- 14 is the maximum we have default data for
+      image = character.telegraph_garbage_images[math.min(garbage.height, 14)][6]
     end
   else
     if config.renderAttacks then
@@ -197,7 +207,7 @@ function Telegraph:renderStageGarbageIcon(sender, receiver, garbage, telegraphIn
       end
     end
     if garbage.isMetal then
-    image = character.telegraph_garbage_images["metal"]
+      image = character.telegraph_garbage_images["metal"]
     else
       image = character.telegraph_garbage_images[1][garbage.width]
     end

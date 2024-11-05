@@ -1,11 +1,10 @@
 local logger = require("common.lib.logger")
 local GameModes = require("common.engine.GameModes")
 local consts = require("common.engine.consts")
-local ReplayV1 = require("common.engine.replayV1")
-local ReplayV2 = require("common.engine.replayV2")
 local utf8 = require("common.lib.utf8Additions")
 local class = require("common.lib.class")
 require("common.lib.timezones")
+local tableUtils = require("common.lib.tableUtils")
 
 local REPLAY_VERSION = 2
 
@@ -89,9 +88,9 @@ function Replay.load(jsonData)
       jsonData.engineVersion = "046"
     end
     if not jsonData.replayVersion then
-      replay = ReplayV1.transform(jsonData)
+      replay = require("common.engine.replayV1").transform(jsonData)
     else
-      replay = ReplayV2.transform(jsonData)
+      replay = require("common.engine.replayV2").transform(jsonData)
     end
     replay.loadedFromFile = true
   end
@@ -100,7 +99,7 @@ function Replay.load(jsonData)
 end
 
 function Replay.addAnalyticsDataToReplay(match, replay)
-  replay.duration = match.gameOverClock
+  replay.duration = match.clock
 
   for i = 1, #match.players do
     if match.players[i].human then
@@ -143,14 +142,21 @@ function Replay.finalReplayFilename(extraPath, extraFilename)
 end
 
 function Replay.finalizeReplay(match, replay)
-  replay = Replay.addAnalyticsDataToReplay(match, replay)
-  replay.stageId = match.stageId
-  for i = 1, #match.players do
-    if match.players[i].stack.confirmedInput then
-      replay.players[i].settings.inputs = Replay.compressInputString(table.concat(match.players[i].stack.confirmedInput))
+  if not replay.loadedFromFile then
+    replay = Replay.addAnalyticsDataToReplay(match, replay)
+    replay.stageId = match.stageId
+    for i = 1, #match.players do
+      if match.players[i].stack.confirmedInput then
+        replay.players[i].settings.inputs = Replay.compressInputString(table.concat(match.players[i].stack.confirmedInput))
+      end
+    end
+    replay.incomplete = match.aborted
+
+    if #match.winners == 1 then
+      -- ideally this would be public player id
+      replay.winnerIndex = tableUtils.indexOf(match.players, match.winners[1])
     end
   end
-  replay.incomplete = match.aborted
 end
 
 -- writes a replay file of the given path and filename

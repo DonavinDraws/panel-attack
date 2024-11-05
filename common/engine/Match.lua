@@ -191,7 +191,7 @@ function Match:debugRollbackAndCaptureState(clockGoal)
 
   local rollbackResult = P1:rollbackToFrame(clockGoal)
   assert(rollbackResult)
-  if P2 then
+  if P2 and P2.clock > clockGoal then
     rollbackResult = P2:rollbackToFrame(clockGoal)
     assert(rollbackResult)
   end
@@ -314,7 +314,11 @@ function Match:pushGarbageTo(stack)
           -- hypothetically, IF the receiving stack's garbage target was different than the sender forcing the rollback here
           --  it may be necessary to perform extra steps to ensure the recipient of the stack getting rolled back is getting correct garbage
           --  which may even include another rollback
-          self:rollbackToFrame(stack, oldestTransitTime)
+          if not self:rollbackToFrame(stack, oldestTransitTime) then
+            -- if we can't rollback, it's a desync
+            st.tooFarBehindError = true
+            self:abort()
+          end
         end
         local garbageDelivery = st.outgoingGarbage:popFinishedTransitsAt(stack.clock)
         if garbageDelivery then
@@ -357,28 +361,36 @@ function Match:shouldSaveRollback(stack)
   return false
 end
 
+-- attempt to rollback the specified stack to the specified frame
+-- return true if successful
+-- return false if not
 function Match:rollbackToFrame(stack, frame)
   if stack.rollbackCopies[frame] then
     if stack:rollbackToFrame(frame) then
       if self.isFromReplay then
         stack.lastRollbackFrame = -1
       end
-    else
-      self:abort()
+      return true
     end
   end
+
+  return false
 end
 
--- rewind is ONLY to be used for replay playback as it is relies on all stacks being at the same clock time
+-- rewind is ONLY to be used for replay playback as it relies on all stacks being at the same clock time
+-- and also uses slightly different data required only in a both-sides rollback scenario that would never occur for online rollback
 function Match:rewindToFrame(frame)
-  for i = 1, #self.stacks do
-    local stack = self.stacks[i]
-    if stack.rollbackCopies[frame] then
-      stack:rollbackToFrame(frame)
-      stack.lastRollbackFrame = -1
+  local failed = false
+  for i, stack in ipairs(self.stacks) do
+    if not stack:rewindToFrame(frame) then
+      failed = true
+      break
     end
   end
-  self.clock = frame
+  if not failed then
+    self.clock = frame
+    self.ended = false
+  end
 end
 
 local countdownEnd = consts.COUNTDOWN_START + consts.COUNTDOWN_LENGTH
@@ -691,8 +703,6 @@ end
 
 function Match:handleMatchEnd()
   self:checkAborted()
-  -- this prepares everything about the replay except the save location
-  Replay.finalizeReplay(self, self.replay)
 
   if self.aborted then
     self.winners = {}
@@ -703,11 +713,10 @@ function Match:handleMatchEnd()
     for i = 1, #winners do
       characters[winners[i].stack.character]:playWinSfx()
     end
-    if #winners == 1 then
-      -- ideally this would be public player id
-      self.replay.winnerIndex = tableUtils.indexOf(self.players, winners[1])
-    end
   end
+
+  -- this prepares everything about the replay except the save location
+  Replay.finalizeReplay(self, self.replay)
 
   -- execute callbacks
   self:emitSignal("matchEnded", self)
@@ -715,7 +724,8 @@ end
 
 function Match:isIrrecoverablyDesynced()
   for _, stack in ipairs(self.stacks) do
-    if stack.tooFarBehindError then
+    if stack.garbageTarget and stack.clock + MAX_LAG < stack.garbageTarget.clock then
+      stack.tooFarBehindError = true
       return true
     end
   end
@@ -786,7 +796,7 @@ function Match:shouldRun(stack, runsSoFar)
 
   -- In debug mode allow non-local player 2 to fall a certain number of frames behind
   if config.debug_mode and not stack.is_local and config.debug_vsFramesBehind and config.debug_vsFramesBehind > 0 and stack.which == 2 then
-    -- Only stay behind if the game isn't over for the local player (=opponentStack) yet
+    -- Only stay behind if the game isn't over for the local player (=garbageTarget) yet
     if stack.garbageTarget and stack.garbageTarget.game_ended and stack.garbageTarget:game_ended() == false then
       if stack.clock + config.debug_vsFramesBehind >= stack.garbageTarget.clock then
         return false

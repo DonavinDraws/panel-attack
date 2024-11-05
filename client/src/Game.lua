@@ -48,7 +48,7 @@ local Game = class(
     self.server_queue = ServerQueue()
     self.main_menu_screen_pos = {consts.CANVAS_WIDTH / 2 - 108 + 50, consts.CANVAS_HEIGHT / 2 - 111}
     self.config = config
-    self.localization = Localization()
+    self.localization = Localization
     self.replay = {}
     self.currently_paused_tracks = {} -- list of tracks currently paused
     self.rich_presence = RichPresence()
@@ -62,9 +62,9 @@ local Game = class(
     self.backgroundColor = { 0.0, 0.0, 0.0 }
 
     -- depends on canvasXScale
-    self.global_canvas = love.graphics.newCanvas(consts.CANVAS_WIDTH, consts.CANVAS_HEIGHT, {dpiscale=newCanvasSnappedScale(self)})
+    self.globalCanvas = love.graphics.newCanvas(consts.CANVAS_WIDTH, consts.CANVAS_HEIGHT, {dpiscale=newCanvasSnappedScale(self)})
 
-    self.availableScales = {1, 1.5, 2, 2.5, 3}
+    self.automaticScales = {1, 1.5, 2, 2.5, 3}
     -- specifies a time that is compared against self.timer to determine if GameScale should be shown
     self.showGameScaleUntil = 0
     self.needsAssetReload = false
@@ -88,11 +88,21 @@ local Game = class(
 
 Game.newCanvasSnappedScale = newCanvasSnappedScale
 
-function Game:load(gameUpdater)
+function Game:load()
   -- TODO: include this with save.lua?
   require("client.src.puzzles")
   -- move to constructor
-  self.gameUpdater = gameUpdater
+  self.updater = GAME_UPDATER or nil
+  if self.updater then
+    logger.debug("Launching game with updater")
+    local success = pcall(self.updater.init, self.updater)
+    if not success then
+      logger.debug("updater:init failed")
+      self.updater = nil
+    end
+  else
+    logger.debug("Launching game without updater")
+  end
   local user_input_conf = save.read_key_file()
   if user_input_conf then
     self.input:importConfigurations(user_input_conf)
@@ -103,10 +113,29 @@ function Game:load(gameUpdater)
   self.globalCanvas = love.graphics.newCanvas(consts.CANVAS_WIDTH, consts.CANVAS_HEIGHT, {dpiscale=GAME:newCanvasSnappedScale()})
 end
 
+local function detectHardwareProblems()
+  local OS = love.system.getOS()
+  if OS == "Windows" then
+    local version, vendor = select(2, love.graphics.getRendererInfo())
+    if vendor == "ATI Technologies Inc." and
+		(version:find("22.7.1", 1, true) or version:find(".2207", 1, true)) then
+      love.window.showMessageBox(
+        "AMD driver 22.7.1 detected",
+        "AMD driver 22.7.1 is known to have problems with running LÖVE (this includes Panel Attack). If the game fails to render its visuals, it is recommended to upgrade or downgrade your AMD GPU drivers.",
+        "warning"
+      )
+    end
+  end
+end
+
 function Game:setupRoutine()
   -- loading various assets into the game
   coroutine.yield("Loading localization...")
-  Localization.init(localization)
+  Localization:init()
+  self.setLanguage(config.language_code)
+
+  detectHardwareProblems()
+
   fileUtils.copyFile("docs/puzzles.txt", "puzzles/README.txt")
   
   coroutine.yield(loc("ld_theme"))
@@ -196,10 +225,10 @@ function Game:createDirectoriesIfNeeded()
 end
 
 function Game:checkForUpdates()
-  --check for game updates
-  if self.gameUpdater and self.gameUpdater.check_update_ingame then
-    wait_game_update = self.gameUpdater:async_download_latest_version()
-  end
+  -- --check for game updates
+  -- if self.updater and self.updater.check_update_ingame then
+  --   wait_game_update = self.updater:async_download_latest_version()
+  -- end
 end
 
 function Game:runUnitTests()
@@ -337,8 +366,8 @@ function Game.errorData(errorString, traceBack)
   local loveVersion = Game.loveVersionString() or "Unknown"
   local username = config.name or "Unknown"
   local buildVersion
-  if GAME_UPDATER then
-    buildVersion = GAME_UPDATER.activeReleaseStream.name .. " " .. GAME_UPDATER.activeVersion.version
+  if GAME.updater then
+    buildVersion = GAME.updater.activeReleaseStream.name .. " " .. GAME.updater.activeVersion.version
   else
     buildVersion = "Unknown"
   end
@@ -409,7 +438,7 @@ function Game.detailedErrorLogString(errorData)
         "    P" .. i .. ": " .. newLine ..
         "      Player Number: " .. stack.playerNumber .. newLine ..
         "      Character: " .. stack.character .. newLine ..
-        "      Panels: " .. stack.panels .. newLine ..
+        "      InputMethod: " .. stack.inputMethod .. newLine ..
         "      Rollback Count: " .. stack.rollbackCount .. newLine ..
         "      Rollback Frames Saved: " .. stack.rollbackCopyCount
       end
@@ -464,7 +493,7 @@ end
 function Game:updateCanvasPositionAndScale(newWindowWidth, newWindowHeight)
   local scaleIsUpdated = false
   if config.gameScaleType ~= "fit" then
-    local availableScales = shallowcpy(self.availableScales)
+    local availableScales = shallowcpy(self.automaticScales)
     if config.gameScaleType == "fixed" then
       availableScales = {config.gameScaleFixedValue}
     end
@@ -474,11 +503,11 @@ function Game:updateCanvasPositionAndScale(newWindowWidth, newWindowHeight)
     for i = #availableScales, 1, -1 do
       local scale = availableScales[i]
       if config.gameScaleType ~= "auto" or 
-        (newWindowWidth >= consts.CANVAS_WIDTH * scale and newWindowHeight >= consts.CANVAS_HEIGHT * scale) then
+        (newWindowWidth >= self.globalCanvas:getWidth() * scale and newWindowHeight >= self.globalCanvas:getHeight() * scale) then
         self.canvasXScale = scale
         self.canvasYScale = scale
-        self.canvasX = math.floor((newWindowWidth - (scale * consts.CANVAS_WIDTH)) / 2)
-        self.canvasY = math.floor((newWindowHeight - (scale * consts.CANVAS_HEIGHT)) / 2)
+        self.canvasX = math.floor((newWindowWidth - (scale * self.globalCanvas:getWidth())) / 2)
+        self.canvasY = math.floor((newWindowHeight - (scale * self.globalCanvas:getHeight())) / 2)
         scaleIsUpdated = true
         break
       end
@@ -488,9 +517,10 @@ function Game:updateCanvasPositionAndScale(newWindowWidth, newWindowHeight)
   if scaleIsUpdated == false then
     -- The only thing left to do is scale to fit the window
     local w, h
-    self.canvasX, self.canvasY, w, h = scale_letterbox(newWindowWidth, newWindowHeight, 16, 9)
-    self.canvasXScale = w / consts.CANVAS_WIDTH
-    self.canvasYScale = h / consts.CANVAS_HEIGHT
+    local canvasWidth, canvasHeight = self.globalCanvas:getDimensions()
+    self.canvasX, self.canvasY, w, h = scale_letterbox(newWindowWidth, newWindowHeight, canvasWidth, canvasHeight)
+    self.canvasXScale = w / canvasWidth
+    self.canvasYScale = h / canvasHeight
   end
 
   self.previousWindowWidth = newWindowWidth
@@ -507,7 +537,7 @@ function Game:refreshCanvasAndImagesForNewScale()
   self:drawLoadingString(loc("ld_characters"))
   coroutine.yield()
 
-  self.globalCanvas = love.graphics.newCanvas(consts.CANVAS_WIDTH, consts.CANVAS_HEIGHT, {dpiscale=self:newCanvasSnappedScale()})
+  self.globalCanvas = love.graphics.newCanvas(GAME.globalCanvas:getWidth(), GAME.globalCanvas:getHeight(), {dpiscale=self:newCanvasSnappedScale()})
   -- We need to reload all assets and fonts to get the new scaling info and filters
 
   -- Reload theme to get the new resolution assets
@@ -521,7 +551,7 @@ function Game:refreshCanvasAndImagesForNewScale()
   characters_reload_graphics()
   
   -- Reload loc to get the new font
-  localization:set_language(config.language_code)
+  self.setLanguage(config.language_code)
 end
 
 -- Transform from window coordinates to game coordinates
@@ -538,6 +568,28 @@ function Game:drawLoadingString(loadingString)
   local backgroundPadding = 10
   GraphicsUtil.drawRectangle("fill", consts.CANVAS_WIDTH / 2 - (textMaxWidth / 2) , y - backgroundPadding, textMaxWidth, textHeight, 0, 0, 0, 0.5)
   GraphicsUtil.printf(loadingString, x, y, consts.CANVAS_WIDTH, "center", nil, nil, 10)
+end
+
+function Game.setLanguage(lang_code)
+  for i, v in ipairs(Localization.codes) do
+    if v == lang_code then
+      Localization.lang_index = i
+      break
+    end
+  end
+  config.language_code = Localization.codes[Localization.lang_index]
+
+  if themes[config.theme] and themes[config.theme].font and themes[config.theme].font.path then
+    GraphicsUtil.setGlobalFont(themes[config.theme].font.path, themes[config.theme].font.size)
+  elseif config.language_code == "JP" then
+    GraphicsUtil.setGlobalFont("client/assets/fonts/jp.ttf", 14)
+  elseif config.language_code == "TH" then
+    GraphicsUtil.setGlobalFont("client/assets/fonts/th.otf", 14)
+  else
+    GraphicsUtil.setGlobalFont(nil, 12)
+  end
+
+  Localization:refresh_global_strings()
 end
 
 return Game

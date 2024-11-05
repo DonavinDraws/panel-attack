@@ -3,7 +3,6 @@ require("common.lib.mathExtensions")
 local utf8 = require("common.lib.utf8Additions")
 local inputManager = require("common.lib.inputManager")
 require("client.src.globals")
-local consts = require("client.src.CustomRun")
 local touchHandler = require("client.src.ui.touchHandler")
 local inputFieldManager = require("client.src.ui.inputFieldManager")
 local ClientMessages = require("common.network.ClientProtocol")
@@ -19,12 +18,10 @@ GAME = Game()
 -- We override love.run with a function that refers to `runInternal` for its gameloop function
 -- so by overwriting that, the new runInternal will get used on the next iteration
 love.runInternal = CustomRun.innerRun
-if GAME_UPDATER == nil then
-  -- We don't have an autoupdater, so we need to override run.
-  -- In the autoupdater case run will already have been overridden and be running
-  love.run = CustomRun.run
-end
 
+function love.run()
+  return CustomRun.run()
+end
 
 -- Called at the beginning to load the game
 -- Either called directly or from auto_updater
@@ -35,10 +32,27 @@ function love.load(args)
   if config.maximizeOnStartup and not love.window.isMaximized() then
     love.window.maximize()
   end
+
+  -- there is a bug on windows that causes the game to start like it was borderless
+  -- check for that and restore the window if that's the case:
+  local dWidth, desktopHeight = love.window.getDesktopDimensions()
+  local x, y = love.window.getPosition()
+  local w, windowHeight, flags = love.window.getMode()
+
+  if not flags.fullscreen and not flags.borderless then
+    if y == 0 and windowHeight == desktopHeight then
+      if love.window.isMaximized() then
+        love.window.restore()
+      end
+      love.window.updateMode(w, windowHeight - 30, flags)
+      love.window.setPosition(x, 30)
+    end
+  end
+
   local newPixelWidth, newPixelHeight = love.graphics.getWidth(), love.graphics.getHeight()
   GAME:updateCanvasPositionAndScale(newPixelWidth, newPixelHeight)
 
-  GAME:load(GAME_UPDATER)
+  GAME:load()
 end
 
 function love.focus(f)
@@ -175,9 +189,9 @@ function love.errorhandler(msg)
     local errorData = Game.errorData(sanitizedMessage, sanitizedTrace)
     local detailedErrorLogString = Game.detailedErrorLogString(errorData)
     errorData.detailedErrorLogString = detailedErrorLogString
-    if GAME_UPDATER_GAME_VERSION then
-      GAME.netClient:sendErrorReport(errorData, consts.SERVER_LOCATION, 59569)
-    end
+    -- if GAME_UPDATER_GAME_VERSION then
+    --   GAME.netClient:sendErrorReport(errorData, consts.SERVER_LOCATION, 59569)
+    -- end
     return detailedErrorLogString
   end
 
@@ -317,4 +331,8 @@ end
 
 function love.keyreleased(key, unicode)
   inputManager:keyReleased(key, unicode)
+end
+
+function love.joystickaxis(joystick, axisIndex, value)
+  inputManager:joystickaxis(joystick, axisIndex, value)
 end

@@ -40,6 +40,7 @@ function ServerMessages.sanitizeMenuState(menuState)
   sanitized.selectedStageId = menuState.stage_is_random
   sanitized.level = menuState.level
   sanitized.wantsRanked = menuState.ranked
+  sanitized.inputMethod = menuState.inputMethod
 
   sanitized.wantsReady = menuState.wants_ready
   sanitized.hasLoaded = menuState.loaded
@@ -152,6 +153,7 @@ function ServerMessages.sanitizeSettings(settings)
     level = settings.level,
     characterId = settings.character,
     panelId = settings.panels_dir,
+    inputMethod = settings.inputMethod,
     sanitized = true
   }
 end

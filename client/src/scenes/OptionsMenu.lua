@@ -18,6 +18,7 @@ local SetUserIdMenu = require("client.src.scenes.SetUserIdMenu")
 local UiElement = require("client.src.ui.UIElement")
 local GraphicsUtil = require("client.src.graphics.graphics_util")
 local ScrollText = require("client.src.ui.ScrollText")
+local util = require("common.lib.util")
 
 -- @module optionsMenu
 -- Scene for the options menu
@@ -86,7 +87,7 @@ local function createToggleButtonGroup(configField, onChangeFn)
     buttons = {TextButton({width = 60, label = Label({text = "op_off"})}), TextButton({width = 60, label = Label({text = "op_on"})})},
     values = {false, true},
     selectedIndex = config[configField] and 2 or 1,
-    onChange = function(value)
+    onChange = function(group, value)
       GAME.theme:playMoveSfx()
       config[configField] = value
       if onChangeFn then
@@ -121,7 +122,7 @@ function OptionsMenu:getSystemInfo()
   sysInfo[#sysInfo + 1] = {name = "Graphics Card", value = graphicsCardName}
   sysInfo[#sysInfo + 1] = {name = "LOVE Version", value = GAME:loveVersionString()}
   sysInfo[#sysInfo + 1] = {name = "Panel Attack Engine Version", value = consts.ENGINE_VERSION}
-  sysInfo[#sysInfo + 1] = {name = "Panel Attack Release Version", value = GAME_UPDATER_GAME_VERSION}
+  sysInfo[#sysInfo + 1] = {name = "Panel Attack Release Version", value = GAME.updater and tostring(GAME.updater.activeVersion.version) or nil}
   sysInfo[#sysInfo + 1] = {name = "Save Data Directory Path", value = love.filesystem.getSaveDirectory()}
   sysInfo[#sysInfo + 1] = {name = "Characters [Enabled/Total]", value = #characters_ids_for_current_theme .. "/" .. #characters_ids}
   sysInfo[#sysInfo + 1] = {name = "Stages [Enabled/Total]", value = #stages_ids_for_current_theme .. "/" .. #stages_ids}
@@ -151,18 +152,18 @@ end
 function OptionsMenu:loadBaseMenu()
   local languageNumber
   local languageName = {}
-  for k, v in ipairs(localization:get_list_codes()) do
-    languageName[#languageName + 1] = {v, localization.data[v]["LANG"]}
-    if localization:get_language() == v then
+  for k, v in ipairs(Localization:get_list_codes()) do
+    languageName[#languageName + 1] = {v, Localization.data[v]["LANG"]}
+    if Localization:get_language() == v then
       languageNumber = k
     end
   end
   local languageLabels = {}
   for k, v in ipairs(languageName) do
     local lang = config.language_code
-    localization:set_language(v[1])
+    GAME.setLanguage(v[1])
     languageLabels[#languageLabels + 1] = Label({text = v[2], translate = false, width = 70, height = 25})
-    localization:set_language(lang)
+    GAME.setLanguage(lang)
   end
 
   local languageStepper = Stepper({
@@ -171,7 +172,7 @@ function OptionsMenu:loadBaseMenu()
     selectedIndex = languageNumber,
     onChange = function(value)
       GAME.theme:playMoveSfx()
-      localization:set_language(value[1])
+      GAME.setLanguage(value[1])
       self:updateMenuLanguage()
     end
   })
@@ -218,7 +219,7 @@ function OptionsMenu:loadGeneralMenu()
     },
     values = {"with my name", "anonymously", "not at all"},
     selectedIndex = saveReplaysPubliclyIndexMap[config.save_replays_publicly],
-    onChange = function(value)
+    onChange = function(group, value)
       GAME.theme:playMoveSfx()
       config.save_replays_publicly = value
     end
@@ -230,20 +231,91 @@ function OptionsMenu:loadGeneralMenu()
     GAME.theme:playMoveSfx()
   end
 
+  local releaseStreamSelection
+
+  if GAME.updater and GAME.updater.releaseStreams and GAME_UPDATER_STATES then
+    local releaseStreams = {}
+
+    for name, _ in pairs(GAME.updater.releaseStreams) do
+      releaseStreams[#releaseStreams+1] = name
+    end
+
+    -- in case the version was changed earlier and we return to options again, reset to the currently launched version
+    -- this is so whatever the user leaves the setting on when quitting options that will be what is launched with next time
+    GAME.updater:writeLaunchConfig(GAME.updater.activeVersion)
+
+    local buttons = {}
+
+    for i = 1, #releaseStreams do
+      buttons[#buttons+1] = TextButton({label = Label({text = releaseStreams[i], translate = false})})
+    end
+
+    local function updateReleaseStreamConfig(releaseStreamName)
+      local releaseStream = GAME.updater.releaseStreams[releaseStreamName]
+      local version = GAME.updater.getLatestInstalledVersion(releaseStream)
+      if not version then
+        if not GAME.updater:updateAvailable(releaseStream) then
+          GAME.updater:getAvailableVersions(releaseStream)
+          while GAME.updater.state ~= GAME_UPDATER_STATES.idle do
+            GAME.updater:update()
+          end
+        end
+        if GAME.updater:updateAvailable(releaseStream) then
+          table.sort(releaseStream.availableVersions, function(a,b) return a.version > b.version end)
+          version = releaseStream.availableVersions[1]
+        else
+          return false
+        end
+      end
+      GAME.updater:writeLaunchConfig(version)
+
+      return true
+    end
+
+    releaseStreamSelection = ButtonGroup({
+      buttons = buttons,
+      values = releaseStreams,
+      selectedIndex = tableUtils.indexOf(releaseStreams, GAME.updater.activeVersion.releaseStream.name),
+      onChange = function(group, value)
+        GAME.theme:playMoveSfx()
+        local success = updateReleaseStreamConfig(value)
+        if not success then
+          -- there are no versions for the picked stream
+          -- for safety reasons remove the option for that button so the updater does not start in a potentially unsalvageable configuration
+          local index = tableUtils.indexOf(releaseStreams, value)
+          group:removeButtonByValue(value)
+          index = util.bound(1, index, #group.buttons)
+          -- simulate changing to the button that replaces the one that got removed due to no attached versions
+          group.buttons[index]:onClick(nil, 0)
+        end
+      end
+    })
+  end
+
   local generalMenuOptions = {
     MenuItem.createToggleButtonGroupMenuItem("op_fps", nil, nil, createToggleButtonGroup("show_fps")),
     MenuItem.createToggleButtonGroupMenuItem("op_ingame_infos", nil, nil, createToggleButtonGroup("show_ingame_infos")),
     MenuItem.createToggleButtonGroupMenuItem("op_analytics", nil, nil, createToggleButtonGroup("enable_analytics", function()
       analytics.init()
     end)),
-    MenuItem.createSliderMenuItem("op_input_delay", nil, nil, createConfigSlider("input_repeat_delay", 0, 50)),
     MenuItem.createToggleButtonGroupMenuItem("op_replay_public", nil, nil, publicReplayButtonGroup),
     MenuItem.createSliderMenuItem("op_performance_drain", nil, nil, performanceSlider),
-    MenuItem.createButtonMenuItem("back", nil, nil, function()
-          GAME.theme:playCancelSfx()
-        self:switchToScreen("baseMenu")
-      end)
   }
+
+  if releaseStreamSelection then
+    generalMenuOptions[#generalMenuOptions+1] = MenuItem.createToggleButtonGroupMenuItem("Release Stream", nil, false, releaseStreamSelection)
+  end
+
+  generalMenuOptions[#generalMenuOptions + 1] = MenuItem.createButtonMenuItem("back", nil, nil,
+  function()
+    GAME.theme:playCancelSfx()
+    self:switchToScreen("baseMenu")
+    if GAME.updater and GAME.updater.releaseStreams then
+      if releaseStreamSelection.value ~= GAME.updater.activeReleaseStream.name then
+        love.window.showMessageBox("Changing Release Stream", "Please restart the game to launch the selected release stream")
+      end
+    end
+  end)
 
   local menu = Menu.createCenteredMenu(generalMenuOptions)
   return menu
@@ -284,44 +356,51 @@ function OptionsMenu:loadGraphicsMenu()
     end
   end
 
-  local fixedScaleData = {}
-  for _, value in ipairs(GAME.availableScales) do
-    fixedScaleData[#fixedScaleData + 1] = {}
-    fixedScaleData[#fixedScaleData].value = value
-    fixedScaleData[#fixedScaleData].label = value
-  end
-  for index, value in ipairs(fixedScaleData) do
-    value.index = index
-  end
-  local function updateFixedScale(fixedScale)
-    assert(config.gameScaleType == "fixed")
-    config.gameScaleFixedValue = fixedScale
-    scaleSettingsChanged()
-  end
-
-  local fixedScaleButtonGroup = ButtonGroup({
-    buttons = tableUtils.map(fixedScaleData, function(scaleType)
-      return TextButton({label = Label({text = scaleType.label, translate = false})})
-    end),
-    values = tableUtils.map(fixedScaleData, function(scaleType)
-      return scaleType.value
-    end),
-    selectedIndex = tableUtils.first(fixedScaleData, function(scaleType)
-      return scaleType.value == config.gameScaleFixedValue
-    end).index or 1,
-    onChange = function(value)
-      GAME.theme:playMoveSfx()
-      updateFixedScale(value)
+  local function getFixedScaleSlider()
+    local slider = Slider({
+      min = 50,
+      max = 300,
+      value = (config.gameScaleFixedValue * 100) or 100,
+      tickLength = 1,
+      onValueChange = function(slider)
+        config.gameScaleFixedValue = slider.value / 100
+        scaleSettingsChanged()
+      end
+    })
+    slider.minText:set(slider.min / 100)
+    slider.maxText:set(slider.max / 100)
+    slider.valueText:set(slider.value / 100)
+    slider.setValue = function(s, value)
+      if value ~= s.value then
+        s.value = util.bound(s.min, value, s.max)
+        s.valueText:set(s.value / 100)
+        s:onValueChange()
+      end
     end
-  })
+    slider.receiveInputs = function(s, input)
+      if input:isPressedWithRepeat("Left") then
+        s:setValue(s.value - 10)
+      elseif input:isPressedWithRepeat("Right") then
+        s:setValue(s.value + 10)
+      end
+    end
+    local function touchDrag(s, x, y)
+      local screenX, screenY = s:getScreenPos()
+      s.valueText:set((math.floor((x - screenX) / s.tickLength) + s.min) / 100)
+    end
+    slider.onTouch = touchDrag
+    slider.onDrag = touchDrag
+    return slider
+  end
 
-  local fixedScaleGroup = MenuItem.createToggleButtonGroupMenuItem("op_scale_fixed_value", nil, nil, fixedScaleButtonGroup)
+  local fixedScaleSlider = MenuItem.createSliderMenuItem("op_scale_fixed_value", nil, true,
+    getFixedScaleSlider())
   local function updateFixedButtonGroupVisibility()
     if config.gameScaleType ~= "fixed" then
-      self.menus.graphicsMenu:removeMenuItem(fixedScaleGroup.id)
+      self.menus.graphicsMenu:removeMenuItem(fixedScaleSlider.id)
     else
-      if self.menus.graphicsMenu:containsMenuItemID(fixedScaleGroup.id) == false then
-        self.menus.graphicsMenu:addMenuItem(3, fixedScaleGroup)
+      if self.menus.graphicsMenu:containsMenuItemID(fixedScaleSlider.id) == false then
+        self.menus.graphicsMenu:addMenuItem(3, fixedScaleSlider)
       end
     end
   end
@@ -343,7 +422,7 @@ function OptionsMenu:loadGraphicsMenu()
     selectedIndex = tableUtils.first(scaleTypeData, function(scaleType)
       return scaleType.value == config.gameScaleType
     end).index,
-    onChange = function(value)
+    onChange = function(group, value)
       GAME.theme:playMoveSfx()
       config.gameScaleType = value
       updateFixedButtonGroupVisibility()
@@ -352,7 +431,6 @@ function OptionsMenu:loadGraphicsMenu()
   })
 
   local function getShakeIntensitySlider()
-    
     local slider = Slider({
       min = 50,
       max = 100,
@@ -389,7 +467,7 @@ function OptionsMenu:loadGraphicsMenu()
 
   local menu = Menu.createCenteredMenu(graphicsMenuOptions)
   if config.gameScaleType == "fixed" then
-    menu:addMenuItem(3, fixedScaleGroup)
+    menu:addMenuItem(3, fixedScaleSlider)
   end
   return menu
 end
@@ -403,7 +481,7 @@ function OptionsMenu:loadSoundMenu()
     },
     values = {"stage", "often_stage", "either", "often_characters", "characters"},
     selectedIndex = musicFrequencyIndexMap[config.use_music_from],
-    onChange = function(value)
+    onChange = function(group, value)
       GAME.theme:playMoveSfx()
       config.use_music_from = value
     end
@@ -440,10 +518,13 @@ function OptionsMenu:loadDebugMenu()
     MenuItem.createSliderMenuItem("VS Frames Behind", nil, false, createConfigSlider("debug_vsFramesBehind", 0, 200)),
     MenuItem.createToggleButtonGroupMenuItem("Show Debug Servers", nil, false, createToggleButtonGroup("debugShowServers")),
     MenuItem.createToggleButtonGroupMenuItem("Show Design Helper", nil, false, createToggleButtonGroup("debugShowDesignHelper")),
+    MenuItem.createButtonMenuItem("Window Size Tester", nil, false, function()
+      GAME.navigationStack:push(require("client.src.scenes.WindowSizeTester")())
+    end),
     MenuItem.createButtonMenuItem("back", nil, nil, function()
           GAME.theme:playCancelSfx()
           self:switchToScreen("baseMenu")
-        end)
+        end),
   }
 
   return Menu.createCenteredMenu(debugMenuOptions)

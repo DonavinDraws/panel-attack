@@ -79,6 +79,10 @@ local function processCharacterSelectMessage(self, message)
   -- these extra messages will remain unprocessed in the queue and need to be cleared up so they don't get applied the next match
   self.tcpClient:dropOldInputMessages()
 
+  if not self.room then
+    return
+  end
+
   -- character_select and create_room are the same message
   -- except that character_select has an additional character_select = true flag
   message = ServerMessages.sanitizeCreateRoom(message)
@@ -110,17 +114,20 @@ local function processLeaveRoomMessage(self, message)
       self.room.match:deinit()
     end
 
-    if self.room then
-      -- and then shutdown the room
-      self.room:shutdown()
-      self.room = nil
-    end
+    -- and then shutdown the room
+    self.room:shutdown()
+    self.room = nil
+
     self.state = states.ONLINE
     GAME.navigationStack:popToName("Lobby")
   end
 end
 
 local function processTauntMessage(self, message)
+  if not self.room then
+    return
+  end
+
   local characterId = tableUtils.first(self.room.players, function(player)
     return player.playerNumber == message.player_number
   end).settings.characterId
@@ -128,6 +135,10 @@ local function processTauntMessage(self, message)
 end
 
 local function processMatchStartMessage(self, message)
+  if not self.room then
+    return
+  end
+
   message = ServerMessages.sanitizeStartMatch(message)
 
   for _, playerSettings in ipairs(message.playerSettings) do
@@ -138,18 +149,25 @@ local function processMatchStartMessage(self, message)
         if playerSettings.level ~= player.settings.level then
           player:setLevel(playerSettings.level)
         end
-        if player.isLocal and not player.inputConfiguration then
-          -- fallback in case the player lost their input config while the server sent the message
-          player:restrictInputs(player.lastUsedInputConfiguration)
+        if player.isLocal then
+          if not player.inputConfiguration then
+            -- fallback in case the player lost their input config while the server sent the message
+            player:restrictInputs(player.lastUsedInputConfiguration)
+          end
+        else
+          if playerSettings.inputMethod ~= player.settings.inputMethod then
+            -- since only one player can claim touch, touch is unclaimed every time we return to character select
+            -- this also means they will send controller as their input method until they ready up
+            -- if the remote touch player readies up AFTER the local client, we never get informed about the change in input method
+            -- besides for the match start message itself
+            -- so it's very important to set this here
+            player:setInputMethod(playerSettings.inputMethod)
+          end
         end
         -- generally I don't think it's a good idea to try and rematch the other diverging settings here
         -- everyone is loaded and ready which can only happen after character/panel data was already exchanged
         -- if they diverge it's because the chosen mod is missing on the other client
         -- generally I think server should only send physics relevant data with match_start
-        -- if playerSettings.characterId ~= player.settings.characterId then
-        -- end
-        -- if playerSettings.panelId ~= player.settings.panelId then
-        -- end
       end
     end
   end
@@ -169,10 +187,18 @@ local function processMatchStartMessage(self, message)
 end
 
 local function processWinCountsMessage(self, message)
+  if not self.room then
+    return
+  end
+
   self.room:setWinCounts(message.win_counts)
 end
 
 local function processRankedStatusMessage(self, message)
+  if not self.room then
+    return
+  end
+
   local rankedStatus = message.ranked_match_approved or false
   local comments = ""
   if message.reasons then
@@ -224,7 +250,6 @@ end
 
 -- starts to spectate a 2p vs online match
 local function spectate2pVsOnlineMatch(self, spectateRequestGrantedMessage)
-  -- Not yet implemented
   GAME.battleRoom = BattleRoom.createFromServerMessage(spectateRequestGrantedMessage)
   self.room = GAME.battleRoom
   if GAME.battleRoom.match then

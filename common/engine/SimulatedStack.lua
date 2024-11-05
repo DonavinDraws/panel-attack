@@ -134,7 +134,6 @@ function SimulatedStack:render()
   self:drawFrame()
   self:drawWall(0, 12)
   self:drawCanvas()
-  self:drawAbsoluteMultibar(0, 0)
 
   self:drawDebug()
 end
@@ -180,28 +179,59 @@ function SimulatedStack:saveForRollback()
   end
 end
 
+local function internalRollbackToFrame(stack, frame)
+  local copy = stack.rollbackCopies[frame]
+
+  if copy and frame < stack.clock then
+    for f = frame, stack.clock do
+      if stack.rollbackCopies[f] then
+        stack.rollbackCopyPool:push(stack.rollbackCopies[f])
+        stack.rollbackCopies[f] = nil
+      end
+    end
+
+    if stack.healthEngine then
+      stack.healthEngine:rollbackToFrame(frame)
+      stack.health = stack.healthEngine.framesToppedOutToLose
+    else
+      stack.health = copy.health
+    end
+
+    return true
+  end
+
+  return false
+end
+
 function SimulatedStack:rollbackToFrame(frame)
-  local copy = self.rollbackCopies[frame]
+  if internalRollbackToFrame(self, frame) then
+    self.incomingGarbage:rollbackToFrame(frame)
 
-  for i = frame + 1, self.clock do
-    self.rollbackCopyPool:push(self.rollbackCopies[i])
-    self.rollbackCopies[i] = nil
+    if self.attackEngine then
+      self.attackEngine:rollbackToFrame(frame)
+    end
+
+    self.lastRollbackFrame = self.clock
+    self.clock = frame
+    return true
   end
 
-  self.incomingGarbage:rollbackToFrame(frame)
+  return false
+end
 
-  if self.attackEngine then
-    self.attackEngine:rollbackToFrame(frame)
+function SimulatedStack:rewindToFrame(frame)
+  if internalRollbackToFrame(self, frame) then
+    self.incomingGarbage:rewindToFrame(frame)
+
+    if self.attackEngine then
+      self.attackEngine:rewindToFrame(frame)
+    end
+
+    self.clock = frame
+    return true
   end
 
-  if self.healthEngine then
-    self.healthEngine:rollbackToFrame(frame)
-    self.health = self.healthEngine.framesToppedOutToLose
-  else
-    self.health = copy.health
-  end
-  self.lastRollbackFrame = self.clock
-  self.clock = frame
+  return false
 end
 
 function SimulatedStack:starting_state()

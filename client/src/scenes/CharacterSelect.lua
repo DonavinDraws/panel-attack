@@ -266,12 +266,31 @@ function CharacterSelect:getCharacterButtons()
     characterButton.characterId = character.id
     characterButton.image = ImageContainer({image = character.images.icon, hFill = true, vFill = true})
     characterButton:addChild(characterButton.image)
-    characterButton.label = Label({text = character.display_name, translate = character.id == consts.RANDOM_CHARACTER_SPECIAL_VALUE, vAlign = "top", hAlign = "center"})
+    characterButton.label = Label({text = character.display_name, translate = character.id == consts.RANDOM_CHARACTER_SPECIAL_VALUE, vAlign = "top", hAlign = "center", wrap = true})
     characterButton:addChild(characterButton.label)
 
     if character.flag and themes[config.theme].images.flags[character.flag] then
-      characterButton.flag = ImageContainer({image = themes[config.theme].images.flags[character.flag], vAlign = "bottom", hAlign = "right", x = -2, y = -2, scale = 0.5})
+      characterButton.flag = ImageContainer({image = themes[config.theme].images.flags[character.flag], vAlign = "bottom", hAlign = "right", x = -2, y = -2, width = 16, height = 16})
       characterButton:addChild(characterButton.flag)
+    end
+
+    if character.stage and stages[character.stage] then
+      -- draw the stage icon in the center
+      characterButton.stageIcon = ImageContainer({image = stages[character.stage].images.thumbnail, vAlign = "bottom", hAlign = "center", y = -2, width = 32, height = 16})
+      characterButton:addChild(characterButton.stageIcon)
+    end
+
+    if character.panels and panels[character.panels] then
+      -- draw the color 1 normal panel in the left corner
+      -- it's only available on the sheet so we got to render it to its own canvas first
+      local panels = panels[character.panels]
+      local canvas = love.graphics.newCanvas(panels.size, panels.size)
+      canvas:renderTo(function()
+        panels:drawPanelFrame(1, "normal", 0, 0, panels.size)
+      end)
+
+      characterButton.panelIcon = ImageContainer({image = canvas, vAlign = "bottom", hAlign = "left", x = 2, y = -2, width = 16, height = 16})
+      characterButton:addChild(characterButton.panelIcon)
     end
 
     characterButtons[#characterButtons + 1] = characterButton
@@ -586,7 +605,11 @@ function CharacterSelect:createRankedSelection(player, width)
       self:setValue(true)
     elseif inputs.isDown["Down"] then
       self:setValue(false)
-    elseif inputs.isDown["Swap2"] or inputs.isDown["Swap1"] then
+    elseif inputs.isDown["Swap1"] then
+      GAME.theme:playValidationSfx()
+      self:yieldFocus()
+    elseif inputs.isDown["Swap2"] then
+      GAME.theme:playCancelSfx()
       self:yieldFocus()
     end
   end
@@ -627,7 +650,11 @@ function CharacterSelect:createStyleSelection(player, width)
       self:setValue(true)
     elseif inputs.isDown["Down"] then
       self:setValue(false)
-    elseif inputs.isDown["Swap2"] or inputs.isDown["Swap1"] then
+    elseif inputs.isDown["Swap1"] then
+      GAME.theme:playValidationSfx()
+      self:yieldFocus()
+    elseif inputs.isDown["Swap2"] then
+      GAME.theme:playCancelSfx()
       self:yieldFocus()
     end
   end
@@ -660,8 +687,8 @@ function CharacterSelect:createRecordsBox(lastText)
   local stackPanel = StackPanel({alignment = "top", hFill = true, vAlign = "center"})
 
   local lastLines = UiElement({hFill = true})
-  local lastLinesLabel = PixelFontLabel({ text = lastText, xScale = 0.5, yScale = 1, hAlign = "left", x = 20})
-  local lastLinesValue = PixelFontLabel({ text = self.lastScore, xScale = 0.5, yScale = 1, hAlign = "right", x = -20})
+  local lastLinesLabel = PixelFontLabel({ text = lastText, xScale = 0.5, yScale = 1, hAlign = "left", x = 10})
+  local lastLinesValue = PixelFontLabel({ text = self.lastScore, xScale = 0.5, yScale = 1, hAlign = "right", x = -10})
   lastLines.height = lastLinesLabel.height + 4
   lastLines.label = lastLinesLabel
   lastLines.value = lastLinesValue
@@ -671,8 +698,8 @@ function CharacterSelect:createRecordsBox(lastText)
   stackPanel:addElement(lastLines)
 
   local record = UiElement({hFill = true})
-  local recordLabel = PixelFontLabel({ text = "record", xScale = 0.5, yScale = 1, hAlign = "left", x = 20})
-  local recordValue = PixelFontLabel({ text = self.record, xScale = 0.5, yScale = 1, hAlign = "right", x = -20})
+  local recordLabel = PixelFontLabel({ text = "record", xScale = 0.5, yScale = 1, hAlign = "left", x = 10})
+  local recordValue = PixelFontLabel({ text = self.record, xScale = 0.5, yScale = 1, hAlign = "right", x = -10})
   record.height = recordLabel.height + 4
   record.label = recordLabel
   record.value = recordValue
@@ -875,6 +902,7 @@ function CharacterSelect:update(dt)
   end
   if GAME.battleRoom and GAME.battleRoom.spectating then
     if input.isDown["MenuEsc"] then
+      GAME.theme:playCancelSfx()
       GAME.netClient:leaveRoom()
       GAME.battleRoom.online = false
       GAME.navigationStack:pop(nil, function() GAME.battleRoom:shutdown() end)
@@ -892,7 +920,12 @@ function CharacterSelect:draw()
 end
 
 function CharacterSelect:leave()
-  GAME.navigationStack:pop(nil, function() GAME.battleRoom:shutdown() end)
+  GAME.navigationStack:pop(nil,
+    function()
+      if GAME.battleRoom then
+        GAME.battleRoom:shutdown()
+      end
+    end)
 end
 
 return CharacterSelect
