@@ -361,11 +361,11 @@ function Character:initializeStackAnimation(stack)
           local finish = false
           if stack.match.ended then
             switch = (stack.game_over_clock <= 0 and "win") or "lose"
-          elseif state == "hurt" and stack.shake_time > 0 then
+          elseif stack.shake_time > 0 then
             switch = "hurt"
           elseif state == "attack" then
             switch = "attack"
-          elseif (stack.danger)then
+          elseif (stack.danger and anim.animations["danger"] ~= nil)then
             switch = "danger"
             finish = anim.currentAnim ~= "normal"
           else

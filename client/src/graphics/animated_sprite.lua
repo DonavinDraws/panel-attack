@@ -128,9 +128,9 @@ function AnimatedSprite.loadSpriteFromConfig(file)
         end
         if (func == "addFrame") then
           if repeatCount then
-            repeatHold[#repeatHold+1] = {tonumber(frame), tonumber(length) or tonumber(duration) or 2}
+            repeatHold[#repeatHold+1] = {tonumber(frame), (tonumber(length) or 1) * (tonumber(duration) or 2)}
           else
-            sprite.animations[name]:addFrame(tonumber(frame), tonumber(length) or tonumber(duration) or 2)
+            sprite.animations[name]:addFrame(tonumber(frame), (tonumber(length) or 1) * (tonumber(duration) or 2))
           end
         end
         if (func == "repeat") then

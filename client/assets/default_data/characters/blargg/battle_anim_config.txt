@@ -1,7 +1,7 @@
 spritePath: battle.png
 frameSize: (20, 40)
 {
-    [intro]
+    [intro, 4]
         addFrame(10, 30)
         addFrame(9)
         addFrame(11)
